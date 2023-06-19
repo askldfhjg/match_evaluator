@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package match_evaluator;
+
+option go_package = "./proto;match_evaluator";
+
+service Match_evaluator {
+	rpc Call(Request) returns (Response) {}
+}
+
+message Request {
+	string name = 1;
+}
+
+message Response {
+	string msg = 1;
+}
