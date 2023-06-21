@@ -1,10 +1,11 @@
 module match_evaluator
 
-go 1.15
+go 1.20
 
 require (
 	github.com/golang/protobuf v1.4.3
 	github.com/micro/micro/v3 v3.3.0
+	github.com/orcaman/concurrent-map/v2 v2.0.1 // indirect
 	github.com/rs/cors v1.9.0 // indirect
 	google.golang.org/protobuf v1.26.0-rc.1
 )

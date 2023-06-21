@@ -5,13 +5,28 @@ package match_evaluator;
 option go_package = "./proto;match_evaluator";
 
 service Match_evaluator {
-	rpc Call(Request) returns (Response) {}
+	rpc ToEval(ToEvalReq) returns (ToEvalRsp) {}
 }
 
-message Request {
-	string name = 1;
+message MatchDetail {
+    repeated string ids = 1; // 组内详情
+    int32 score = 2;         // 组的评分
+    string gameId = 3;
 }
 
-message Response {
-	string msg = 1;
+message ToEvalReq {
+    repeated MatchDetail details = 1; // 成组结果
+    string taskId = 2;              // 任务ID
+    string subTaskId = 3;           // 子任务ID
+    string gameId = 4;              // 游戏ID
+    int64 subType = 5;              // poolID
+    string evalGroupId = 6;         // 后置优化组的ID
+    int64 evalGroupTaskCount = 7;   // 后置优化组内子任务数
+    int64 evalGroupSubId = 8;       // 后置优化组内子任务ID
+	int64 version = 9;
+}
+
+message ToEvalRsp {
+	int32 code = 1;
+	string err = 2;
 }
