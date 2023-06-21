@@ -18,8 +18,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const processExpireTime = 10
-
 func NewManager(opts ...evaluator.EvaluatorOption) evaluator.Manager {
 	m := &defaultMgr{
 		exited:      make(chan struct{}, 1),
