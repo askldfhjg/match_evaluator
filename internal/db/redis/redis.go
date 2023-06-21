@@ -94,10 +94,10 @@ func (m *redisBackend) GetQueueCount(ctx context.Context, gameId string, subType
 	return redis.Int(redisConn.Do("ZCARD", zsetKey))
 }
 
-func (m *redisBackend) RemoveTokens(ctx context.Context, playerIds []string, gameId string, subType int64) error {
+func (m *redisBackend) RemoveTokens(ctx context.Context, playerIds []string, gameId string, subType int64) (int, error) {
 	redisConn, err := m.redisPool.GetContext(ctx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer handleConnectionClose(&redisConn)
 	zsetKey := fmt.Sprintf(allTickets, gameId, subType)
@@ -108,9 +108,9 @@ func (m *redisBackend) RemoveTokens(ctx context.Context, playerIds []string, gam
 		inter1 = append(inter1, fmt.Sprintf(ticketKey, ply))
 		inter2 = append(inter2, ply)
 	}
-	redisConn.Do("DEL", inter1...)
+	delCount, _ := redis.Int(redisConn.Do("DEL", inter1...))
 	redisConn.Do("ZREM", inter2...)
-	return nil
+	return delCount, nil
 }
 
 func (m *redisBackend) GetPoolVersion(ctx context.Context, gameId string, subType int64) (int64, error) {

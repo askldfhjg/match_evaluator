@@ -103,16 +103,25 @@ func (m *defaultMgr) processEval(chnl chan *match_evaluator.ToEvalReq, gId strin
 	getIndex := 0
 	groupId := gId
 	channel := chnl
+	gameId := ""
+	var subType int64
+	var version int64
 	var list []*match_evaluator.MatchDetail
-	timer := time.After(10 * time.Second)
+	timer := time.After(2 * time.Second)
 	go func() {
 		for {
 			select {
 			case <-timer:
+				if len(list) > 0 {
+					m.eval(list, groupId, version, gameId, subType)
+				}
 				m.msgBackList <- groupId
 				list = nil
 				return
 			case req := <-channel:
+				gameId = req.GetGameId()
+				subType = req.GetSubType()
+				version = req.GetVersion()
 				flag := (getIndex >> (req.EvalGroupSubId - 1)) & 1
 				if flag <= 0 {
 					getIndex += int(math.Exp2(float64(req.EvalGroupSubId - 1)))
@@ -120,7 +129,7 @@ func (m *defaultMgr) processEval(chnl chan *match_evaluator.ToEvalReq, gId strin
 				}
 
 				if getIndex == int(math.Exp2(float64(req.EvalGroupTaskCount))) {
-					m.eval(list, groupId, req.Version, req.GetGameId(), req.GetSubType())
+					m.eval(list, groupId, req.Version, gameId, subType)
 					m.msgBackList <- groupId
 					list = nil
 					return
@@ -149,11 +158,15 @@ func (m *defaultMgr) eval(list []*match_evaluator.MatchDetail, groupId string, v
 			}
 			nowV, err := m.getPoolVersion(gameId, subType)
 			if err == nil && nowV == version {
-				err = db.Default.RemoveTokens(ctx, detail.Ids, gameId, subType)
+				delCount, err := db.Default.RemoveTokens(ctx, detail.Ids, gameId, subType)
 				if err == nil {
-					errs := m.PublishPoolVersion(detail)
-					if errs != nil {
-						logger.Errorf("PublishPoolVersion have err %s", errs.Error())
+					if delCount != len(detail.Ids) {
+						logger.Errorf("PublishPoolVersion delCount have err %d %d", delCount, len(detail.Ids))
+					} else {
+						errs := m.PublishPoolVersion(detail)
+						if errs != nil {
+							logger.Errorf("PublishPoolVersion have err %s", errs.Error())
+						}
 					}
 				} else {
 					logger.Errorf("RemoveTokens have err %s", err.Error())
