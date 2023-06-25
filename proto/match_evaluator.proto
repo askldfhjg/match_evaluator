@@ -10,7 +10,7 @@ service Match_evaluator {
 
 message MatchDetail {
     repeated string ids = 1; // 组内详情
-    int32 score = 2;         // 组的评分
+    int64 score = 2;         // 组的评分
     string gameId = 3;
 }
 

@@ -104,6 +104,7 @@ func (m *defaultMgr) processEval(chnl chan *match_evaluator.ToEvalReq, gId strin
 	groupId := gId
 	channel := chnl
 	gameId := ""
+	var taskCount int64
 	var subType int64
 	var version int64
 	var list []*match_evaluator.MatchDetail
@@ -113,7 +114,7 @@ func (m *defaultMgr) processEval(chnl chan *match_evaluator.ToEvalReq, gId strin
 			select {
 			case <-timer:
 				if len(list) > 0 {
-					m.eval(list, groupId, version, gameId, subType)
+					m.eval(list, groupId, version, gameId, subType, taskCount == 1)
 				}
 				m.msgBackList <- groupId
 				list = nil
@@ -122,6 +123,7 @@ func (m *defaultMgr) processEval(chnl chan *match_evaluator.ToEvalReq, gId strin
 				gameId = req.GetGameId()
 				subType = req.GetSubType()
 				version = req.GetVersion()
+				taskCount = req.GetEvalGroupTaskCount()
 				flag := (getIndex >> (req.EvalGroupSubId - 1)) & 1
 				if flag <= 0 {
 					getIndex += int(math.Exp2(float64(req.EvalGroupSubId - 1)))
@@ -129,7 +131,7 @@ func (m *defaultMgr) processEval(chnl chan *match_evaluator.ToEvalReq, gId strin
 				}
 
 				if getIndex == int(math.Exp2(float64(req.EvalGroupTaskCount))) {
-					m.eval(list, groupId, req.Version, gameId, subType)
+					m.eval(list, groupId, req.Version, gameId, subType, taskCount == 1)
 					m.msgBackList <- groupId
 					list = nil
 					return
@@ -139,22 +141,29 @@ func (m *defaultMgr) processEval(chnl chan *match_evaluator.ToEvalReq, gId strin
 	}()
 }
 
-func (m *defaultMgr) eval(list []*match_evaluator.MatchDetail, groupId string, version int64, gameId string, subType int64) {
-	sort.Slice(list, func(i, j int) bool {
-		return list[i].Score > list[j].Score
-	})
+func (m *defaultMgr) eval(list []*match_evaluator.MatchDetail, groupId string, version int64, gameId string, subType int64, pass bool) {
+	if !pass {
+		sort.Slice(list, func(i, j int) bool {
+			return list[i].Score > list[j].Score
+		})
+	}
 
 	inTeam := map[string]int{}
 	ctx := context.Background()
 	for _, detail := range list {
 		have := false
-		for _, ply := range detail.Ids {
-			_, ok := inTeam[ply]
-			have = have || ok
-		}
-		if !have {
+		if !pass {
 			for _, ply := range detail.Ids {
-				inTeam[ply] = 1
+				_, ok := inTeam[ply]
+				have = have || ok
+			}
+		}
+
+		if !have || pass {
+			if !pass {
+				for _, ply := range detail.Ids {
+					inTeam[ply] = 1
+				}
 			}
 			nowV, err := m.getPoolVersion(gameId, subType)
 			if err == nil && nowV == version {
