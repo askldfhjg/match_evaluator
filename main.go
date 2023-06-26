@@ -30,6 +30,8 @@ func main() {
 			db.Default = svr
 			return nil
 		}),
+		service.AfterStart(evaluator.DefaultManager.Start),
+		service.BeforeStop(evaluator.DefaultManager.Stop),
 	)
 
 	// Register handler

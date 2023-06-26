@@ -126,11 +126,13 @@ func (m *defaultMgr) processEval(chnl chan *match_evaluator.ToEvalReq, gId strin
 				taskCount = req.GetEvalGroupTaskCount()
 				flag := (getIndex >> (req.EvalGroupSubId - 1)) & 1
 				if flag <= 0 {
+					//logger.Infof("add item %v", req.EvalGroupSubId)
 					getIndex += int(math.Exp2(float64(req.EvalGroupSubId - 1)))
 					list = append(list, req.Details...)
 				}
-
-				if getIndex == int(math.Exp2(float64(req.EvalGroupTaskCount))) {
+				//logger.Infof("now item %v", getIndex)
+				if getIndex == int(math.Exp2(float64(req.EvalGroupTaskCount))-1) {
+					//logger.Infof("start %v", req.EvalGroupTaskCount)
 					m.eval(list, groupId, req.Version, gameId, subType, taskCount == 1)
 					m.msgBackList <- groupId
 					list = nil
@@ -150,6 +152,7 @@ func (m *defaultMgr) eval(list []*match_evaluator.MatchDetail, groupId string, v
 
 	inTeam := map[string]int{}
 	ctx := context.Background()
+	count := 0
 	for _, detail := range list {
 		have := false
 		if !pass {
@@ -170,12 +173,13 @@ func (m *defaultMgr) eval(list []*match_evaluator.MatchDetail, groupId string, v
 				delCount, err := db.Default.RemoveTokens(ctx, detail.Ids, gameId, subType)
 				if err == nil {
 					if delCount != len(detail.Ids) {
-						logger.Errorf("PublishPoolVersion delCount have err %d %d", delCount, len(detail.Ids))
+						logger.Errorf("eval delCount have err %d %d", delCount, len(detail.Ids))
 					} else {
-						errs := m.PublishPoolVersion(detail)
-						if errs != nil {
-							logger.Errorf("PublishPoolVersion have err %s", errs.Error())
-						}
+						// errs := m.PublishResult(detail)
+						// if errs != nil {
+						// 	logger.Errorf("PublishResult have err %s", errs.Error())
+						// }
+						count++
 					}
 				} else {
 					logger.Errorf("RemoveTokens have err %s", err.Error())
@@ -183,6 +187,7 @@ func (m *defaultMgr) eval(list []*match_evaluator.MatchDetail, groupId string, v
 			}
 		}
 	}
+	logger.Infof("result Count %d %v", count, time.Now().UnixNano()/1e6)
 }
 
 func (m *defaultMgr) getPoolVersion(gameId string, subType int64) (int64, error) {
@@ -203,9 +208,9 @@ func (m *defaultMgr) getPoolVersion(gameId string, subType int64) (int64, error)
 	return version, nil
 }
 
-func (m *defaultMgr) PublishPoolVersion(detail *match_evaluator.MatchDetail) error {
+func (m *defaultMgr) PublishResult(detail *match_evaluator.MatchDetail) error {
 	by, _ := proto.Marshal(detail)
-	return broker.Publish("pool_version", &broker.Message{
+	return broker.Publish("match_result", &broker.Message{
 		Header: map[string]string{},
 		Body:   by,
 	})
