@@ -20,11 +20,13 @@ import (
 
 func NewManager(opts ...evaluator.EvaluatorOption) evaluator.Manager {
 	m := &defaultMgr{
-		exited:      make(chan struct{}, 1),
-		msgList:     make(chan *match_evaluator.ToEvalReq, 1000),
-		msgBackList: make(chan string, 100),
-		channelMap:  make(map[string]chan *match_evaluator.ToEvalReq, 100),
-		versionMap:  cmap.New[int64](),
+		exited1:       make(chan struct{}, 1),
+		exited2:       make(chan struct{}, 1),
+		msgList:       make(chan *match_evaluator.ToEvalReq, 1000),
+		msgBackList:   make(chan string, 100),
+		resultChannel: make(chan *match_evaluator.MatchDetail, 1000),
+		channelMap:    make(map[string]chan *match_evaluator.ToEvalReq, 100),
+		versionMap:    cmap.New[int64](),
 	}
 	for _, o := range opts {
 		o(&m.opts)
@@ -33,12 +35,14 @@ func NewManager(opts ...evaluator.EvaluatorOption) evaluator.Manager {
 }
 
 type defaultMgr struct {
-	opts        evaluator.EvaluatorOptions
-	exited      chan struct{}
-	msgList     chan *match_evaluator.ToEvalReq
-	msgBackList chan string
-	channelMap  map[string]chan *match_evaluator.ToEvalReq
-	versionMap  cmap.ConcurrentMap[string, int64]
+	opts          evaluator.EvaluatorOptions
+	exited1       chan struct{}
+	exited2       chan struct{}
+	msgList       chan *match_evaluator.ToEvalReq
+	msgBackList   chan string
+	resultChannel chan *match_evaluator.MatchDetail
+	channelMap    map[string]chan *match_evaluator.ToEvalReq
+	versionMap    cmap.ConcurrentMap[string, int64]
 }
 
 func (m *defaultMgr) Start() error {
@@ -46,12 +50,14 @@ func (m *defaultMgr) Start() error {
 	if err != nil {
 		return err
 	}
+	go m.resultPublishLoop()
 	go m.loop()
 	return nil
 }
 
 func (m *defaultMgr) Stop() error {
-	close(m.exited)
+	close(m.exited1)
+	close(m.exited2)
 	return nil
 }
 
@@ -74,7 +80,7 @@ func (m *defaultMgr) handlerMsg(raw *broker.Message) error {
 func (m *defaultMgr) loop() {
 	for {
 		select {
-		case <-m.exited:
+		case <-m.exited1:
 			return
 		case req := <-m.msgList:
 			version, err := m.getPoolVersion(req.GameId, req.SubType)
@@ -91,6 +97,20 @@ func (m *defaultMgr) loop() {
 			}
 		case groupId := <-m.msgBackList:
 			delete(m.channelMap, groupId)
+		}
+	}
+}
+
+func (m *defaultMgr) resultPublishLoop() {
+	for {
+		select {
+		case <-m.exited2:
+			return
+		case req := <-m.resultChannel:
+			err := m.publishResult(req)
+			if err != nil {
+				logger.Errorf("PublishResult have err %s", err.Error())
+			}
 		}
 	}
 }
@@ -146,7 +166,7 @@ func (m *defaultMgr) processEval(chnl chan *match_evaluator.ToEvalReq, gId strin
 func (m *defaultMgr) eval(list []*match_evaluator.MatchDetail, groupId string, version int64, gameId string, subType int64, pass bool) {
 	if !pass {
 		sort.Slice(list, func(i, j int) bool {
-			return list[i].Score > list[j].Score
+			return list[i].Score < list[j].Score
 		})
 	}
 
@@ -175,10 +195,7 @@ func (m *defaultMgr) eval(list []*match_evaluator.MatchDetail, groupId string, v
 					if delCount != len(detail.Ids) {
 						logger.Errorf("eval delCount have err %d %d", delCount, len(detail.Ids))
 					} else {
-						// errs := m.PublishResult(detail)
-						// if errs != nil {
-						// 	logger.Errorf("PublishResult have err %s", errs.Error())
-						// }
+						m.resultChannel <- detail
 						count++
 					}
 				} else {
@@ -208,7 +225,7 @@ func (m *defaultMgr) getPoolVersion(gameId string, subType int64) (int64, error)
 	return version, nil
 }
 
-func (m *defaultMgr) PublishResult(detail *match_evaluator.MatchDetail) error {
+func (m *defaultMgr) publishResult(detail *match_evaluator.MatchDetail) error {
 	by, _ := proto.Marshal(detail)
 	return broker.Publish("match_result", &broker.Message{
 		Header: map[string]string{},
