@@ -236,6 +236,18 @@ func (m *defaultMgr) eval(list []*match_evaluator.MatchDetail, groupId string, v
 			}
 		}
 	}
+	if len(deleteList) > 0 {
+		delCount, err := db.Default.RemoveTokens(ctx, deleteList, gameId, subType)
+		if err == nil {
+			m.resultChannel1 <- retDetail
+			count++
+			if delCount != len(deleteList) {
+				logger.Errorf("eval delCount have err %d %d", delCount, len(deleteList))
+			}
+		} else {
+			logger.Errorf("RemoveTokens have err %s", err.Error())
+		}
+	}
 	logger.Infof("result Count timer %d %v", count, time.Now().UnixNano()/1e6)
 }
 
