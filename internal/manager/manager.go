@@ -78,7 +78,7 @@ func (m *defaultMgr) handlerMsg(raw *broker.Message) error {
 	if err != nil {
 		return err
 	}
-	logger.Info("handlerMsg %+v", msg)
+	logger.Infof("handlerMsg %+v", msg)
 	m.versionMap.Set(fmt.Sprintf("%s:%d", msg.GameId, msg.SubType), msg.Version)
 	return nil
 }
