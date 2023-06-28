@@ -20,13 +20,15 @@ import (
 
 func NewManager(opts ...evaluator.EvaluatorOption) evaluator.Manager {
 	m := &defaultMgr{
-		exited1:       make(chan struct{}, 1),
-		exited2:       make(chan struct{}, 1),
-		msgList:       make(chan *match_evaluator.ToEvalReq, 1000),
-		msgBackList:   make(chan string, 100),
-		resultChannel: make(chan *match_evaluator.MatchDetail, 1000),
-		channelMap:    make(map[string]chan *match_evaluator.ToEvalReq, 100),
-		versionMap:    cmap.New[int64](),
+		exited1:        make(chan struct{}, 1),
+		exited2:        make(chan struct{}, 1),
+		exited3:        make(chan struct{}, 1),
+		msgList:        make(chan *match_evaluator.ToEvalReq, 1000),
+		msgBackList:    make(chan string, 100),
+		resultChannel1: make(chan []*match_evaluator.MatchDetail, 1000),
+		resultChannel2: make(chan *match_evaluator.MatchDetail, 10000),
+		channelMap:     make(map[string]chan *match_evaluator.ToEvalReq, 100),
+		versionMap:     cmap.New[int64](),
 	}
 	for _, o := range opts {
 		o(&m.opts)
@@ -35,14 +37,16 @@ func NewManager(opts ...evaluator.EvaluatorOption) evaluator.Manager {
 }
 
 type defaultMgr struct {
-	opts          evaluator.EvaluatorOptions
-	exited1       chan struct{}
-	exited2       chan struct{}
-	msgList       chan *match_evaluator.ToEvalReq
-	msgBackList   chan string
-	resultChannel chan *match_evaluator.MatchDetail
-	channelMap    map[string]chan *match_evaluator.ToEvalReq
-	versionMap    cmap.ConcurrentMap[string, int64]
+	opts           evaluator.EvaluatorOptions
+	exited1        chan struct{}
+	exited2        chan struct{}
+	exited3        chan struct{}
+	msgList        chan *match_evaluator.ToEvalReq
+	msgBackList    chan string
+	resultChannel1 chan []*match_evaluator.MatchDetail
+	resultChannel2 chan *match_evaluator.MatchDetail
+	channelMap     map[string]chan *match_evaluator.ToEvalReq
+	versionMap     cmap.ConcurrentMap[string, int64]
 }
 
 func (m *defaultMgr) Start() error {
@@ -50,7 +54,8 @@ func (m *defaultMgr) Start() error {
 	if err != nil {
 		return err
 	}
-	go m.resultPublishLoop()
+	go m.resultPublishLoop1()
+	go m.resultPublishLoop2()
 	go m.loop()
 	return nil
 }
@@ -58,6 +63,7 @@ func (m *defaultMgr) Start() error {
 func (m *defaultMgr) Stop() error {
 	close(m.exited1)
 	close(m.exited2)
+	close(m.exited3)
 	return nil
 }
 
@@ -101,15 +107,30 @@ func (m *defaultMgr) loop() {
 	}
 }
 
-func (m *defaultMgr) resultPublishLoop() {
+func (m *defaultMgr) resultPublishLoop1() {
 	for {
 		select {
 		case <-m.exited2:
 			return
-		case req := <-m.resultChannel:
+		case reqs := <-m.resultChannel1:
+			for _, bb := range reqs {
+				m.resultChannel2 <- bb
+			}
+		}
+	}
+}
+
+func (m *defaultMgr) resultPublishLoop2() {
+	for {
+		select {
+		case <-m.exited3:
+			return
+		case req := <-m.resultChannel2:
 			err := m.publishResult(req)
 			if err != nil {
-				logger.Errorf("PublishResult have err %s", err.Error())
+				//logger.Errorf("PublishResult have err %s", err.Error())
+			} else {
+				//logger.Info("fffffff")
 			}
 		}
 	}
@@ -153,8 +174,8 @@ func (m *defaultMgr) processEval(chnl chan *match_evaluator.ToEvalReq, gId strin
 				//logger.Infof("now item %v", getIndex)
 				if getIndex == int(math.Exp2(float64(req.EvalGroupTaskCount))-1) {
 					//logger.Infof("start %v", req.EvalGroupTaskCount)
-					m.eval(list, groupId, req.Version, gameId, subType, taskCount == 1)
 					m.msgBackList <- groupId
+					m.eval(list, groupId, req.Version, gameId, subType, taskCount == 1)
 					list = nil
 					return
 				}
@@ -173,6 +194,8 @@ func (m *defaultMgr) eval(list []*match_evaluator.MatchDetail, groupId string, v
 	inTeam := map[string]int{}
 	ctx := context.Background()
 	count := 0
+	deleteList := make([]string, 0, 128)
+	retDetail := make([]*match_evaluator.MatchDetail, 0, 128)
 	for _, detail := range list {
 		have := false
 		if !pass {
@@ -190,21 +213,30 @@ func (m *defaultMgr) eval(list []*match_evaluator.MatchDetail, groupId string, v
 			}
 			nowV, err := m.getPoolVersion(gameId, subType)
 			if err == nil && nowV == version {
-				delCount, err := db.Default.RemoveTokens(ctx, detail.Ids, gameId, subType)
-				if err == nil {
-					if delCount != len(detail.Ids) {
-						logger.Errorf("eval delCount have err %d %d", delCount, len(detail.Ids))
-					} else {
-						m.resultChannel <- detail
+				deleteList = append(deleteList, detail.Ids...)
+				retDetail = append(retDetail, detail)
+				if len(deleteList) >= 128 {
+					delCount, err := db.Default.RemoveTokens(ctx, deleteList, gameId, subType)
+					if err == nil {
+						m.resultChannel1 <- retDetail
 						count++
+						if delCount != len(deleteList) {
+							logger.Errorf("eval delCount have err %d %d", delCount, len(deleteList))
+						}
+					} else {
+						logger.Errorf("RemoveTokens have err %s", err.Error())
+						break
 					}
-				} else {
-					logger.Errorf("RemoveTokens have err %s", err.Error())
+					deleteList = make([]string, 0, 128)
+					retDetail = make([]*match_evaluator.MatchDetail, 0, 128)
 				}
+			} else {
+				logger.Infof("result Count version break")
+				break
 			}
 		}
 	}
-	logger.Infof("result Count %d %v", count, time.Now().UnixNano()/1e6)
+	logger.Infof("result Count timer %d %v", count, time.Now().UnixNano()/1e6)
 }
 
 func (m *defaultMgr) getPoolVersion(gameId string, subType int64) (int64, error) {
