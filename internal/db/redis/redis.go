@@ -7,6 +7,12 @@ import (
 	"github.com/gomodule/redigo/redis"
 )
 
+const (
+	allTickets     = "allTickets:%s:%d"
+	ticketKey      = "ticket:%s"
+	poolVersionKey = "poolVersionKey:"
+)
+
 func (m *redisBackend) RemoveTokens(ctx context.Context, playerIds []string, gameId string, subType int64) (int, error) {
 	redisConn, err := m.redisPool.GetContext(ctx)
 	if err != nil {
@@ -23,15 +29,16 @@ func (m *redisBackend) RemoveTokens(ctx context.Context, playerIds []string, gam
 	}
 	//delCount, _ := redis.Int(redisConn.Do("DEL", inter1...))
 	return redis.Int(redisConn.Do("ZREM", inter2...))
+	//return len(playerIds), nil
 }
 
-func (m *redisBackend) GetPoolVersion(ctx context.Context, gameId string, subType int64) (int64, error) {
+func (m *redisBackend) GetPoolVersion(ctx context.Context, key string) (int64, error) {
 	redisConn, err := m.redisPool.GetContext(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer handleConnectionClose(&redisConn)
-	vv, err := redis.Int64(redisConn.Do("GET", fmt.Sprintf(poolVersionKey, gameId, subType)))
+	vv, err := redis.Int64(redisConn.Do("GET", poolVersionKey+key))
 	if err != nil {
 		if err == redis.ErrNil {
 			return 0, nil

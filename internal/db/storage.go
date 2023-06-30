@@ -11,7 +11,7 @@ type Service interface {
 	Close(ctx context.Context) error
 	String() string
 	RemoveTokens(ctx context.Context, playerIds []string, gameId string, subType int64) (int, error)
-	GetPoolVersion(ctx context.Context, gameId string, subType int64) (int64, error)
+	GetPoolVersion(ctx context.Context, key string) (int64, error)
 }
 
 type MatchInfo struct {

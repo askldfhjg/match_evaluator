@@ -8,15 +8,17 @@ import (
 	match_evaluator "match_evaluator/proto"
 	"math"
 	"sort"
+	"sync"
 	"time"
 
 	match_process "github.com/askldfhjg/match_apis/match_process/proto"
 
 	"github.com/micro/micro/v3/service/broker"
 	"github.com/micro/micro/v3/service/logger"
-	cmap "github.com/orcaman/concurrent-map/v2"
 	"google.golang.org/protobuf/proto"
 )
+
+const deleteGroupCount = 500
 
 func NewManager(opts ...evaluator.EvaluatorOption) evaluator.Manager {
 	m := &defaultMgr{
@@ -26,9 +28,9 @@ func NewManager(opts ...evaluator.EvaluatorOption) evaluator.Manager {
 		msgList:        make(chan *match_evaluator.ToEvalReq, 1000),
 		msgBackList:    make(chan string, 100),
 		resultChannel1: make(chan []*match_evaluator.MatchDetail, 1000),
-		resultChannel2: make(chan *match_evaluator.MatchDetail, 10000),
+		resultChannel2: make(chan *match_evaluator.MatchDetail, 100000),
 		channelMap:     make(map[string]chan *match_evaluator.ToEvalReq, 100),
-		versionMap:     cmap.New[int64](),
+		versionMap:     &sync.Map{},
 	}
 	for _, o := range opts {
 		o(&m.opts)
@@ -46,7 +48,7 @@ type defaultMgr struct {
 	resultChannel1 chan []*match_evaluator.MatchDetail
 	resultChannel2 chan *match_evaluator.MatchDetail
 	channelMap     map[string]chan *match_evaluator.ToEvalReq
-	versionMap     cmap.ConcurrentMap[string, int64]
+	versionMap     *sync.Map
 }
 
 func (m *defaultMgr) Start() error {
@@ -79,7 +81,7 @@ func (m *defaultMgr) handlerMsg(raw *broker.Message) error {
 		return err
 	}
 	logger.Infof("handlerMsg %+v", msg)
-	m.versionMap.Set(fmt.Sprintf("%s:%d", msg.GameId, msg.SubType), msg.Version)
+	m.versionMap.Store(fmt.Sprintf("%s:%d", msg.GameId, msg.SubType), msg.Version)
 	return nil
 }
 
@@ -89,7 +91,8 @@ func (m *defaultMgr) loop() {
 		case <-m.exited1:
 			return
 		case req := <-m.msgList:
-			version, err := m.getPoolVersion(req.GameId, req.SubType)
+			key := fmt.Sprintf("%s:%d", req.GameId, req.SubType)
+			version, err := m.getPoolVersion(key)
 			if err != nil {
 				logger.Errorf("get version from redis have err %s", err.Error())
 			} else if version == req.Version {
@@ -155,7 +158,7 @@ func (m *defaultMgr) processEval(chnl chan *match_evaluator.ToEvalReq, gId strin
 			select {
 			case <-timer:
 				if len(list) > 0 {
-					m.eval(list, groupId, version, gameId, subType, taskCount == 1)
+					m.Eval(list, groupId, version, gameId, subType, taskCount == 1)
 				}
 				m.msgBackList <- groupId
 				list = nil
@@ -175,7 +178,8 @@ func (m *defaultMgr) processEval(chnl chan *match_evaluator.ToEvalReq, gId strin
 				if getIndex == int(math.Exp2(float64(req.EvalGroupTaskCount))-1) {
 					//logger.Infof("start %v", req.EvalGroupTaskCount)
 					m.msgBackList <- groupId
-					m.eval(list, groupId, req.Version, gameId, subType, taskCount == 1)
+					m.Eval(list, groupId, req.Version, gameId, subType, taskCount == 1)
+					//logger.Infof("result timer %v", time.Now().UnixNano()/1e6)
 					list = nil
 					return
 				}
@@ -184,18 +188,18 @@ func (m *defaultMgr) processEval(chnl chan *match_evaluator.ToEvalReq, gId strin
 	}()
 }
 
-func (m *defaultMgr) eval(list []*match_evaluator.MatchDetail, groupId string, version int64, gameId string, subType int64, pass bool) {
+func (m *defaultMgr) Eval(list []*match_evaluator.MatchDetail, groupId string, version int64, gameId string, subType int64, pass bool) {
 	if !pass {
 		sort.Slice(list, func(i, j int) bool {
 			return list[i].Score < list[j].Score
 		})
 	}
-
+	keyy := fmt.Sprintf("%s:%d", gameId, subType)
 	inTeam := map[string]int{}
 	ctx := context.Background()
 	count := 0
-	deleteList := make([]string, 0, 128)
-	retDetail := make([]*match_evaluator.MatchDetail, 0, 128)
+	deleteList := make([]string, 0, deleteGroupCount)
+	retDetail := make([]*match_evaluator.MatchDetail, 0, deleteGroupCount)
 	for _, detail := range list {
 		have := false
 		if !pass {
@@ -211,11 +215,11 @@ func (m *defaultMgr) eval(list []*match_evaluator.MatchDetail, groupId string, v
 					inTeam[ply] = 1
 				}
 			}
-			nowV, err := m.getPoolVersion(gameId, subType)
+			nowV, err := m.getPoolVersion(keyy)
 			if err == nil && nowV == version {
 				deleteList = append(deleteList, detail.Ids...)
 				retDetail = append(retDetail, detail)
-				if len(deleteList) >= 128 {
+				if len(deleteList) >= deleteGroupCount {
 					delCount, err := db.Default.RemoveTokens(ctx, deleteList, gameId, subType)
 					if err == nil {
 						count += len(retDetail)
@@ -227,8 +231,8 @@ func (m *defaultMgr) eval(list []*match_evaluator.MatchDetail, groupId string, v
 						logger.Errorf("RemoveTokens have err %s", err.Error())
 						break
 					}
-					deleteList = make([]string, 0, 128)
-					retDetail = make([]*match_evaluator.MatchDetail, 0, 128)
+					deleteList = make([]string, 0, deleteGroupCount)
+					retDetail = make([]*match_evaluator.MatchDetail, 0, deleteGroupCount)
 				}
 			} else {
 				logger.Infof("result Count version break")
@@ -251,22 +255,21 @@ func (m *defaultMgr) eval(list []*match_evaluator.MatchDetail, groupId string, v
 	logger.Infof("result Count timer %d %v", count, time.Now().UnixNano()/1e6)
 }
 
-func (m *defaultMgr) getPoolVersion(gameId string, subType int64) (int64, error) {
+func (m *defaultMgr) getPoolVersion(key string) (int64, error) {
 	var err error
 	var newV int64
-	key := fmt.Sprintf("%s:%d", gameId, subType)
-	version, ok := m.versionMap.Get(key)
+	version, ok := m.versionMap.Load(key)
 	if !ok {
-		newV, err = db.Default.GetPoolVersion(context.Background(), gameId, subType)
+		newV, err = db.Default.GetPoolVersion(context.Background(), key)
 		if err != nil {
 			logger.Errorf("get version from redis have err %s", err.Error())
 			return 0, err
 		} else {
 			version = newV
-			m.versionMap.SetIfAbsent(key, version)
+			m.versionMap.LoadOrStore(key, version)
 		}
 	}
-	return version, nil
+	return version.(int64), nil
 }
 
 func (m *defaultMgr) publishResult(detail *match_evaluator.MatchDetail) error {

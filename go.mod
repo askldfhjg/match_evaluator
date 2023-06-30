@@ -7,7 +7,6 @@ require (
 	github.com/golang/protobuf v1.4.3
 	github.com/gomodule/redigo v1.8.9
 	github.com/micro/micro/v3 v3.3.0
-	github.com/orcaman/concurrent-map/v2 v2.0.1
 	github.com/pkg/errors v0.9.1
 	google.golang.org/protobuf v1.26.0-rc.1
 )
