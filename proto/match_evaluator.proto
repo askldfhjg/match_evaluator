@@ -6,12 +6,27 @@ option go_package = "./proto;match_evaluator";
 
 service Match_evaluator {
 	rpc ToEval(ToEvalReq) returns (ToEvalRsp) {}
+    rpc ToEvalReady(ToEvalReadyReq) returns (ToEvalReadyRsp) {}
 }
 
 message MatchDetail {
     repeated string ids = 1; // 组内详情
     int64 score = 2;         // 组的评分
     string gameId = 3;
+}
+
+message ToEvalReadyReq {
+    string gameId = 1;              // 游戏ID
+    int64 subType = 2;              // poolID
+    string evalGroupId = 3;         // 后置优化组的ID
+    int64 evalGroupTaskCount = 4;   // 后置优化组内子任务数
+    int64 evalGroupSubId = 5;       // 后置优化组内子任务ID
+	int64 version = 6;
+}
+
+message ToEvalReadyRsp {
+	int32 code = 1;
+	string err = 2;
 }
 
 message ToEvalReq {

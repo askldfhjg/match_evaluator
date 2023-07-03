@@ -43,6 +43,7 @@ func NewMatchEvaluatorEndpoints() []*api.Endpoint {
 
 type MatchEvaluatorService interface {
 	ToEval(ctx context.Context, in *ToEvalReq, opts ...client.CallOption) (*ToEvalRsp, error)
+	ToEvalReady(ctx context.Context, in *ToEvalReadyReq, opts ...client.CallOption) (*ToEvalReadyRsp, error)
 }
 
 type matchEvaluatorService struct {
@@ -67,15 +68,27 @@ func (c *matchEvaluatorService) ToEval(ctx context.Context, in *ToEvalReq, opts 
 	return out, nil
 }
 
+func (c *matchEvaluatorService) ToEvalReady(ctx context.Context, in *ToEvalReadyReq, opts ...client.CallOption) (*ToEvalReadyRsp, error) {
+	req := c.c.NewRequest(c.name, "MatchEvaluator.ToEvalReady", in)
+	out := new(ToEvalReadyRsp)
+	err := c.c.Call(ctx, req, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // Server API for MatchEvaluator service
 
 type MatchEvaluatorHandler interface {
 	ToEval(context.Context, *ToEvalReq, *ToEvalRsp) error
+	ToEvalReady(context.Context, *ToEvalReadyReq, *ToEvalReadyRsp) error
 }
 
 func RegisterMatchEvaluatorHandler(s server.Server, hdlr MatchEvaluatorHandler, opts ...server.HandlerOption) error {
 	type matchEvaluator interface {
 		ToEval(ctx context.Context, in *ToEvalReq, out *ToEvalRsp) error
+		ToEvalReady(ctx context.Context, in *ToEvalReadyReq, out *ToEvalReadyRsp) error
 	}
 	type MatchEvaluator struct {
 		matchEvaluator
@@ -90,4 +103,8 @@ type matchEvaluatorHandler struct {
 
 func (h *matchEvaluatorHandler) ToEval(ctx context.Context, in *ToEvalReq, out *ToEvalRsp) error {
 	return h.MatchEvaluatorHandler.ToEval(ctx, in, out)
+}
+
+func (h *matchEvaluatorHandler) ToEvalReady(ctx context.Context, in *ToEvalReadyReq, out *ToEvalReadyRsp) error {
+	return h.MatchEvaluatorHandler.ToEvalReady(ctx, in, out)
 }

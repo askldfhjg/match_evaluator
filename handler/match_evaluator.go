@@ -18,3 +18,9 @@ func (e *Match_evaluator) ToEval(ctx context.Context, req *match_evaluator.ToEva
 	evaluator.DefaultManager.AddMsg(req)
 	return nil
 }
+
+func (e *Match_evaluator) ToEvalReady(ctx context.Context, req *match_evaluator.ToEvalReadyReq, rsp *match_evaluator.ToEvalReadyRsp) error {
+	//logger.Infof("ToEvalReady timer %v", time.Now().UnixNano()/1e6)
+	evaluator.DefaultManager.AddMsg(req)
+	return nil
+}

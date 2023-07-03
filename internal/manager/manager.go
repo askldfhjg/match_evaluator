@@ -6,8 +6,6 @@ import (
 	"match_evaluator/evaluator"
 	"match_evaluator/internal/db"
 	match_evaluator "match_evaluator/proto"
-	"math"
-	"sort"
 	"sync"
 	"time"
 
@@ -18,18 +16,16 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const deleteGroupCount = 500
-
 func NewManager(opts ...evaluator.EvaluatorOption) evaluator.Manager {
 	m := &defaultMgr{
 		exited1:        make(chan struct{}, 1),
 		exited2:        make(chan struct{}, 1),
 		exited3:        make(chan struct{}, 1),
-		msgList:        make(chan *match_evaluator.ToEvalReq, 1000),
+		msgList:        make(chan interface{}, 1000),
 		msgBackList:    make(chan string, 100),
 		resultChannel1: make(chan []*match_evaluator.MatchDetail, 1000),
 		resultChannel2: make(chan *match_evaluator.MatchDetail, 100000),
-		channelMap:     make(map[string]chan *match_evaluator.ToEvalReq, 100),
+		channelMap:     make(map[string]chan interface{}, 100),
 		versionMap:     &sync.Map{},
 	}
 	for _, o := range opts {
@@ -43,11 +39,11 @@ type defaultMgr struct {
 	exited1        chan struct{}
 	exited2        chan struct{}
 	exited3        chan struct{}
-	msgList        chan *match_evaluator.ToEvalReq
+	msgList        chan interface{}
 	msgBackList    chan string
 	resultChannel1 chan []*match_evaluator.MatchDetail
 	resultChannel2 chan *match_evaluator.MatchDetail
-	channelMap     map[string]chan *match_evaluator.ToEvalReq
+	channelMap     map[string]chan interface{}
 	versionMap     *sync.Map
 }
 
@@ -91,18 +87,36 @@ func (m *defaultMgr) loop() {
 		case <-m.exited1:
 			return
 		case req := <-m.msgList:
-			key := fmt.Sprintf("%s:%d", req.GameId, req.SubType)
-			version, err := m.getPoolVersion(key)
-			if err != nil {
-				logger.Errorf("get version from redis have err %s", err.Error())
-			} else if version == req.Version {
-				channel, ok := m.channelMap[req.EvalGroupId]
-				if !ok {
-					channel = make(chan *match_evaluator.ToEvalReq, 10)
-					m.channelMap[req.EvalGroupId] = channel
-					go m.processEval(channel, req.EvalGroupId)
+			var gameId string
+			var subType int64
+			var nowVersion int64
+			var evalGroupId string
+			switch v := req.(type) {
+			case *match_evaluator.ToEvalReadyReq:
+				gameId = v.GameId
+				subType = v.SubType
+				nowVersion = v.Version
+				evalGroupId = v.EvalGroupId
+			case *match_evaluator.ToEvalReq:
+				gameId = v.GameId
+				subType = v.SubType
+				nowVersion = v.Version
+				evalGroupId = v.EvalGroupId
+			}
+			if len(gameId) > 0 {
+				key := fmt.Sprintf("%s:%d", gameId, subType)
+				version, err := m.getPoolVersion(key)
+				if err != nil {
+					logger.Errorf("get version1 from redis have err %s", err.Error())
+				} else if version == nowVersion {
+					channel, ok := m.channelMap[evalGroupId]
+					if !ok {
+						channel = make(chan interface{}, 10)
+						m.channelMap[evalGroupId] = channel
+						go m.processEval(channel, evalGroupId)
+					}
+					channel <- req
 				}
-				channel <- req
 			}
 		case groupId := <-m.msgBackList:
 			delete(m.channelMap, groupId)
@@ -139,120 +153,201 @@ func (m *defaultMgr) resultPublishLoop2() {
 	}
 }
 
-func (m *defaultMgr) AddMsg(req *match_evaluator.ToEvalReq) {
+func (m *defaultMgr) AddMsg(req interface{}) {
 	m.msgList <- req
 }
 
-func (m *defaultMgr) processEval(chnl chan *match_evaluator.ToEvalReq, gId string) {
-	getIndex := 0
+type detailResult struct {
+	List               []*match_evaluator.MatchDetail
+	MissIndex          map[int]bool
+	EvalGroupSubId     int64
+	EvalGroupTaskCount int64
+	Version            int64
+	Key                string
+}
+
+func (m *defaultMgr) processEval(chnl chan interface{}, gId string) {
+	getIndex1 := map[int]bool{}
+	getIndex2 := map[int]bool{}
+	redayOk := false
 	groupId := gId
 	channel := chnl
-	gameId := ""
-	var taskCount int64
-	var subType int64
-	var version int64
-	var list []*match_evaluator.MatchDetail
-	timer := time.After(2 * time.Second)
+
+	inTeam := make(map[string]bool)
+	timer := time.NewTimer(2 * time.Second)
+	msgChannel := make(chan *detailResult, 100)
+	tmpList := make([]*detailResult, 0, 32)
 	go func() {
 		for {
 			select {
-			case <-timer:
-				if len(list) > 0 {
-					m.Eval(list, groupId, version, gameId, subType, taskCount == 1)
-				}
+			case <-timer.C:
+				timer.Stop()
+				close(channel)
 				m.msgBackList <- groupId
-				list = nil
 				return
-			case req := <-channel:
-				gameId = req.GetGameId()
-				subType = req.GetSubType()
-				version = req.GetVersion()
-				taskCount = req.GetEvalGroupTaskCount()
-				flag := (getIndex >> (req.EvalGroupSubId - 1)) & 1
-				if flag <= 0 {
-					//logger.Infof("add item %v", req.EvalGroupSubId)
-					getIndex += int(math.Exp2(float64(req.EvalGroupSubId - 1)))
-					list = append(list, req.Details...)
+			case req := <-msgChannel:
+				if redayOk {
+					m.Rem2(req)
+				} else {
+					tmpList = append(tmpList, req)
 				}
-				//logger.Infof("now item %v", getIndex)
-				if getIndex == int(math.Exp2(float64(req.EvalGroupTaskCount))-1) {
-					//logger.Infof("start %v", req.EvalGroupTaskCount)
-					m.msgBackList <- groupId
-					m.Eval(list, groupId, req.Version, gameId, subType, taskCount == 1)
-					//logger.Infof("result timer %v", time.Now().UnixNano()/1e6)
-					list = nil
-					return
+			case req := <-channel:
+				switch v := req.(type) {
+				case *match_evaluator.ToEvalReadyReq:
+					flag := getIndex1[int(v.EvalGroupSubId)]
+					if !flag {
+						getIndex1[int(v.EvalGroupSubId)] = true
+					}
+					if len(getIndex1) == int(v.EvalGroupTaskCount) && !redayOk {
+						logger.Infof("ready ok %v", time.Now().UnixNano()/1e6)
+						redayOk = true
+						if len(tmpList) > 0 {
+							for _, v := range tmpList {
+								msgChannel <- v
+							}
+							tmpList = tmpList[:0]
+						}
+					}
+				case *match_evaluator.ToEvalReq:
+					flag := getIndex2[int(v.EvalGroupSubId)]
+					if !flag {
+						key := fmt.Sprintf("%s:%d", v.GameId, v.SubType)
+						getIndex2[int(v.EvalGroupSubId)] = true
+						m.Eval2(v.Details, v.EvalGroupSubId, v.EvalGroupTaskCount, v.Version, key, msgChannel, &inTeam)
+					}
+					if len(getIndex2) == int(v.EvalGroupTaskCount) {
+						timer.Stop()
+						close(channel)
+						m.msgBackList <- groupId
+						logger.Infof("result timer %v", time.Now().UnixNano()/1e6)
+					}
 				}
 			}
 		}
 	}()
 }
 
-func (m *defaultMgr) Eval(list []*match_evaluator.MatchDetail, groupId string, version int64, gameId string, subType int64, pass bool) {
-	if !pass {
-		sort.Slice(list, func(i, j int) bool {
-			return list[i].Score < list[j].Score
-		})
-	}
-	keyy := fmt.Sprintf("%s:%d", gameId, subType)
-	inTeam := map[string]int{}
-	ctx := context.Background()
-	count := 0
-	deleteList := make([]string, 0, deleteGroupCount)
-	retDetail := make([]*match_evaluator.MatchDetail, 0, deleteGroupCount)
-	for _, detail := range list {
+// func (m *defaultMgr) Eval(list []*match_evaluator.MatchDetail, groupId string, version int64, keyy string, inTeam *map[string]bool) {
+// 	// if !pass {
+// 	// 	sort.Slice(list, func(i, j int) bool {
+// 	// 		return list[i].Score < list[j].Score
+// 	// 	})
+// 	// }
+// 	// inTeam := map[string]int{}
+// 	ctx := context.Background()
+// 	count := 0
+// 	deleteList := make([]string, 0, deleteGroupCount)
+// 	retDetail := make([]*match_evaluator.MatchDetail, 0, deleteGroupCount)
+// 	for _, detail := range list {
+// 		have := false
+// 		for _, ply := range detail.Ids {
+// 			_, ok := (*inTeam)[ply]
+// 			have = have || ok
+// 		}
+
+// 		if !have {
+// 			for _, ply := range detail.Ids {
+// 				(*inTeam)[ply] = true
+// 			}
+// 			nowV, err := m.getPoolVersion(keyy)
+// 			if err == nil && nowV == version {
+// 				deleteList = append(deleteList, detail.Ids...)
+// 				retDetail = append(retDetail, detail)
+// 				if len(deleteList) >= deleteGroupCount {
+// 					delCount, err := db.Default.RemoveTokens(ctx, deleteList, keyy)
+// 					if err == nil {
+// 						count += len(retDetail)
+// 						m.resultChannel1 <- retDetail
+// 						if delCount != len(deleteList) {
+// 							logger.Errorf("eval delCount have err %d %d", delCount, len(deleteList))
+// 						}
+// 					} else {
+// 						logger.Errorf("RemoveTokens have err %s", err.Error())
+// 						break
+// 					}
+// 					deleteList = make([]string, 0, deleteGroupCount)
+// 					retDetail = make([]*match_evaluator.MatchDetail, 0, deleteGroupCount)
+// 				}
+// 			} else {
+// 				logger.Infof("result Count version break")
+// 				break
+// 			}
+// 		}
+// 	}
+// 	if len(deleteList) > 0 {
+// 		delCount, err := db.Default.RemoveTokens(ctx, deleteList, keyy)
+// 		if err == nil {
+// 			count += len(retDetail)
+// 			m.resultChannel1 <- retDetail
+// 			if delCount != len(deleteList) {
+// 				logger.Errorf("eval delCount have err %d %d", delCount, len(deleteList))
+// 			}
+// 		} else {
+// 			logger.Errorf("RemoveTokens have err %s", err.Error())
+// 		}
+// 	}
+// 	logger.Infof("result Count timer %d %v", count, time.Now().UnixNano()/1e6)
+// }
+
+func (m *defaultMgr) Eval2(list []*match_evaluator.MatchDetail, subId int64, taskCount int64, version int64, keyy string, resultChan chan *detailResult, inTeam *map[string]bool) {
+	missInts := map[int]bool{}
+	haveResult := false
+	for index, detail := range list {
 		have := false
-		if !pass {
-			for _, ply := range detail.Ids {
-				_, ok := inTeam[ply]
-				have = have || ok
-			}
+		for _, ply := range detail.Ids {
+			_, ok := (*inTeam)[ply]
+			have = have || ok
 		}
 
-		if !have || pass {
-			if !pass {
-				for _, ply := range detail.Ids {
-					inTeam[ply] = 1
-				}
+		if !have {
+			for _, ply := range detail.Ids {
+				(*inTeam)[ply] = true
 			}
-			nowV, err := m.getPoolVersion(keyy)
-			if err == nil && nowV == version {
-				deleteList = append(deleteList, detail.Ids...)
-				retDetail = append(retDetail, detail)
-				if len(deleteList) >= deleteGroupCount {
-					delCount, err := db.Default.RemoveTokens(ctx, deleteList, gameId, subType)
-					if err == nil {
-						count += len(retDetail)
-						m.resultChannel1 <- retDetail
-						if delCount != len(deleteList) {
-							logger.Errorf("eval delCount have err %d %d", delCount, len(deleteList))
-						}
-					} else {
-						logger.Errorf("RemoveTokens have err %s", err.Error())
-						break
-					}
-					deleteList = make([]string, 0, deleteGroupCount)
-					retDetail = make([]*match_evaluator.MatchDetail, 0, deleteGroupCount)
-				}
-			} else {
-				logger.Infof("result Count version break")
-				break
-			}
-		}
-	}
-	if len(deleteList) > 0 {
-		delCount, err := db.Default.RemoveTokens(ctx, deleteList, gameId, subType)
-		if err == nil {
-			count += len(retDetail)
-			m.resultChannel1 <- retDetail
-			if delCount != len(deleteList) {
-				logger.Errorf("eval delCount have err %d %d", delCount, len(deleteList))
-			}
+			haveResult = true
 		} else {
-			logger.Errorf("RemoveTokens have err %s", err.Error())
+			missInts[index] = true
 		}
 	}
-	logger.Infof("result Count timer %d %v", count, time.Now().UnixNano()/1e6)
+	nowV, err := m.getPoolVersion(keyy)
+	if err == nil && nowV == version {
+		if haveResult {
+			resultChan <- &detailResult{
+				List:               list,
+				MissIndex:          missInts,
+				EvalGroupSubId:     subId,
+				EvalGroupTaskCount: taskCount,
+				Version:            version,
+				Key:                keyy,
+			}
+		}
+	} else {
+		logger.Infof("result %d poolversion miss", subId)
+	}
+	logger.Infof("result Count timer %d %v", subId, time.Now().UnixNano()/1e6)
+}
+
+func (m *defaultMgr) Rem2(req *detailResult) {
+	retDetail := make([]*match_evaluator.MatchDetail, 0, 256)
+	needCount := 0
+	for pos, detail := range req.List {
+		if _, ok := req.MissIndex[pos]; ok {
+			continue
+		}
+		retDetail = append(retDetail, detail)
+		needCount += len(detail.Ids)
+	}
+	delCount, err := db.Default.RemoveTokens(context.Background(), retDetail, needCount, req.Key)
+	if err == nil {
+		m.resultChannel1 <- retDetail
+		if delCount != needCount {
+			logger.Errorf("eval delCount have err %d %d %d", req.EvalGroupSubId, delCount, needCount)
+		} else {
+			logger.Infof("RemoveTokens success %d %d %d", req.EvalGroupSubId, len(retDetail), time.Now().UnixNano()/1e6)
+		}
+	} else {
+		logger.Errorf("RemoveTokens have err %d %s", req.EvalGroupSubId, err.Error())
+	}
+	//logger.Infof("RemoveTokens success %d %d %d %d", req.EvalGroupSubId, len(req.List), len(retDetail), time.Now().UnixNano()/1e6)
 }
 
 func (m *defaultMgr) getPoolVersion(key string) (int64, error) {

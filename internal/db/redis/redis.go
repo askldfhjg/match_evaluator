@@ -2,34 +2,36 @@ package redis
 
 import (
 	"context"
-	"fmt"
+	match_evaluator "match_evaluator/proto"
 
 	"github.com/gomodule/redigo/redis"
 )
 
 const (
-	allTickets     = "allTickets:%s:%d"
-	ticketKey      = "ticket:%s"
+	allTickets = "allTickets:"
+	//ticketKey      = "ticket:%s"
 	poolVersionKey = "poolVersionKey:"
 )
 
-func (m *redisBackend) RemoveTokens(ctx context.Context, playerIds []string, gameId string, subType int64) (int, error) {
+func (m *redisBackend) RemoveTokens(ctx context.Context, retDetail []*match_evaluator.MatchDetail, needCount int, key string) (int, error) {
 	redisConn, err := m.redisPool.GetContext(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer handleConnectionClose(&redisConn)
-	zsetKey := fmt.Sprintf(allTickets, gameId, subType)
-	//inter1 := make([]interface{}, 0, len(playerIds))
-	inter2 := make([]interface{}, 0, len(playerIds))
-	inter2 = append(inter2, zsetKey)
-	for _, ply := range playerIds {
-		//inter1 = append(inter1, fmt.Sprintf(ticketKey, ply))
-		inter2 = append(inter2, ply)
+	zsetKey := allTickets + key
+
+	queryParams := make([]interface{}, needCount+1)
+	index := 0
+	queryParams[index] = zsetKey
+
+	for _, detail := range retDetail {
+		for _, id := range detail.Ids {
+			index++
+			queryParams[index] = id
+		}
 	}
-	//delCount, _ := redis.Int(redisConn.Do("DEL", inter1...))
-	return redis.Int(redisConn.Do("ZREM", inter2...))
-	//return len(playerIds), nil
+	return redis.Int(redisConn.Do("ZREM", queryParams...))
 }
 
 func (m *redisBackend) GetPoolVersion(ctx context.Context, key string) (int64, error) {
