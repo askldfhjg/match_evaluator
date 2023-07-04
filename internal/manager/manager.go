@@ -93,17 +93,20 @@ func (m *defaultMgr) loop() {
 			var subType int64
 			var nowVersion int64
 			var evalGroupId string
+			var taskCount int64
 			switch v := req.(type) {
 			case *match_evaluator.ToEvalReadyReq:
 				gameId = v.GameId
 				subType = v.SubType
 				nowVersion = v.Version
 				evalGroupId = v.EvalGroupId
+				taskCount = v.EvalGroupTaskCount
 			case *match_evaluator.ToEvalReq:
 				gameId = v.GameId
 				subType = v.SubType
 				nowVersion = v.Version
 				evalGroupId = v.EvalGroupId
+				taskCount = v.EvalGroupTaskCount
 			}
 			if len(gameId) > 0 {
 				key := fmt.Sprintf("%s:%d", gameId, subType)
@@ -115,7 +118,7 @@ func (m *defaultMgr) loop() {
 					if !ok {
 						channel = make(chan interface{}, 10)
 						m.channelMap[evalGroupId] = channel
-						go m.processEval(channel, evalGroupId)
+						go m.processEval(channel, evalGroupId, taskCount)
 					}
 					channel <- req
 				}
@@ -173,7 +176,7 @@ type detailResult struct {
 	EvalStartTime      int64
 }
 
-func (m *defaultMgr) processEval(chnl chan interface{}, gId string) {
+func (m *defaultMgr) processEval(chnl chan interface{}, gId string, taskCount int64) {
 	getIndex1 := map[int]bool{}
 	getIndex2 := map[int]bool{}
 	getIndex3 := map[int]bool{}
@@ -182,8 +185,8 @@ func (m *defaultMgr) processEval(chnl chan interface{}, gId string) {
 	channel := chnl
 
 	inTeam := make(map[string]bool)
-	timer := time.NewTimer(3 * time.Second)
-	msgChannel := make(chan *detailResult, 100)
+	timer := time.NewTimer(20 * time.Second)
+	msgChannel := make(chan *detailResult, taskCount+1)
 	tmpList := make([]*detailResult, 0, 32)
 	var startTime int64
 	go func() {
@@ -196,12 +199,14 @@ func (m *defaultMgr) processEval(chnl chan interface{}, gId string) {
 				break FOR
 			case req := <-msgChannel:
 				if redayOk {
+					//logger.Infof("okkk %d", req.EvalGroupSubId)
 					flag := getIndex3[int(req.EvalGroupSubId)]
 					if !flag {
 						getIndex3[int(req.EvalGroupSubId)] = true
 						m.Rem2(req)
 						m.metricsEach(req)
 					}
+					//logger.Infof("ghhhhhhhhh %d %d %d", req.EvalGroupSubId, len(getIndex3), req.EvalGroupTaskCount)
 					if len(getIndex3) == int(req.EvalGroupTaskCount) {
 						timer.Stop()
 						m.msgBackList <- groupId
@@ -210,6 +215,7 @@ func (m *defaultMgr) processEval(chnl chan interface{}, gId string) {
 						break FOR
 					}
 				} else {
+					//logger.Infof("not okkk %d", req.EvalGroupSubId)
 					tmpList = append(tmpList, req)
 				}
 			case req := <-channel:
@@ -220,13 +226,15 @@ func (m *defaultMgr) processEval(chnl chan interface{}, gId string) {
 						getIndex1[int(v.EvalGroupSubId)] = true
 					}
 					if len(getIndex1) == int(v.EvalGroupTaskCount) && !redayOk {
-						logger.Infof("ready ok %v", time.Now().UnixNano()/1e6)
+						//logger.Infof("ready ok %v %d", time.Now().UnixNano()/1e6, len(tmpList))
 						redayOk = true
 						if len(tmpList) > 0 {
-							for _, v := range tmpList {
-								msgChannel <- v
-							}
-							tmpList = tmpList[:0]
+							go func() {
+								for _, v := range tmpList {
+									msgChannel <- v
+								}
+								tmpList = tmpList[:0]
+							}()
 						}
 					}
 				case *match_evaluator.ToEvalReq:
@@ -239,6 +247,7 @@ func (m *defaultMgr) processEval(chnl chan interface{}, gId string) {
 						}
 						m.Eval2(v, key, startTime, msgChannel, &inTeam)
 					}
+					//logger.Infof("ffffff %d %d %d", v.EvalGroupSubId, len(getIndex2), v.EvalGroupTaskCount)
 					if len(getIndex2) == int(v.EvalGroupTaskCount) {
 						logger.Infof("result timer %v", time.Now().UnixNano()/1e6)
 					}
