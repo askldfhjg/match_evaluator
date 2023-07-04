@@ -6,6 +6,7 @@ import (
 	"match_evaluator/evaluator"
 	"match_evaluator/internal/db"
 	match_evaluator "match_evaluator/proto"
+	"strconv"
 	"sync"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 	"github.com/micro/micro/v3/service/broker"
 	"github.com/micro/micro/v3/service/logger"
+	"github.com/micro/micro/v3/service/metrics"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -164,6 +166,11 @@ type detailResult struct {
 	EvalGroupTaskCount int64
 	Version            int64
 	Key                string
+	StartTime          int64
+	RunTime            int64
+	GameId             string
+	SubType            int64
+	EvalStartTime      int64
 }
 
 func (m *defaultMgr) processEval(chnl chan interface{}, gId string) {
@@ -178,6 +185,7 @@ func (m *defaultMgr) processEval(chnl chan interface{}, gId string) {
 	timer := time.NewTimer(3 * time.Second)
 	msgChannel := make(chan *detailResult, 100)
 	tmpList := make([]*detailResult, 0, 32)
+	var startTime int64
 	go func() {
 	FOR:
 		for {
@@ -192,12 +200,13 @@ func (m *defaultMgr) processEval(chnl chan interface{}, gId string) {
 					if !flag {
 						getIndex3[int(req.EvalGroupSubId)] = true
 						m.Rem2(req)
+						m.metricsEach(req)
 					}
 					if len(getIndex3) == int(req.EvalGroupTaskCount) {
 						timer.Stop()
 						m.msgBackList <- groupId
 						logger.Infof("delete result timer %v", time.Now().UnixNano()/1e6)
-						break FOR
+						m.metrics(req)
 					}
 				} else {
 					tmpList = append(tmpList, req)
@@ -224,7 +233,10 @@ func (m *defaultMgr) processEval(chnl chan interface{}, gId string) {
 					if !flag {
 						key := fmt.Sprintf("%s:%d", v.GameId, v.SubType)
 						getIndex2[int(v.EvalGroupSubId)] = true
-						m.Eval2(v.Details, v.EvalGroupSubId, v.EvalGroupTaskCount, v.Version, key, msgChannel, &inTeam)
+						if startTime < 0 {
+							startTime = time.Now().UnixNano() / 1e6
+						}
+						m.Eval2(v, key, startTime, msgChannel, &inTeam)
 					}
 					if len(getIndex2) == int(v.EvalGroupTaskCount) {
 						logger.Infof("result timer %v", time.Now().UnixNano()/1e6)
@@ -234,6 +246,35 @@ func (m *defaultMgr) processEval(chnl chan interface{}, gId string) {
 		}
 		logger.Infof("%s end", gId)
 	}()
+}
+
+func (m *defaultMgr) metrics(req *detailResult) {
+	now := time.Now().UnixNano() / 1e6
+	tags := metrics.Tags{
+		"gameId":  req.GameId,
+		"subType": strconv.FormatInt(req.SubType, 10),
+	}
+	err := metrics.Timing("match.fulltime", time.Duration(req.StartTime-now)*time.Millisecond, tags)
+	if err != nil {
+		logger.Errorf("match.fulltime:err:%s", err.Error())
+	}
+
+	err = metrics.Timing("match.evaltime", time.Duration(req.EvalStartTime-now)*time.Millisecond, tags)
+	if err != nil {
+		logger.Errorf("match.evaltime:err:%s", err.Error())
+	}
+}
+
+func (m *defaultMgr) metricsEach(req *detailResult) {
+	tags := metrics.Tags{
+		"gameId":  req.GameId,
+		"subType": strconv.FormatInt(req.SubType, 10),
+	}
+
+	err := metrics.Timing("match.evaltime", time.Duration(req.RunTime)*time.Millisecond, tags)
+	if err != nil {
+		logger.Errorf("match.evaltime:err:%s", err.Error())
+	}
 }
 
 // func (m *defaultMgr) Eval(list []*match_evaluator.MatchDetail, groupId string, version int64, keyy string, inTeam *map[string]bool) {
@@ -298,9 +339,9 @@ func (m *defaultMgr) processEval(chnl chan interface{}, gId string) {
 // 	logger.Infof("result Count timer %d %v", count, time.Now().UnixNano()/1e6)
 // }
 
-func (m *defaultMgr) Eval2(list []*match_evaluator.MatchDetail, subId int64, taskCount int64, version int64, keyy string, resultChan chan *detailResult, inTeam *map[string]bool) {
+func (m *defaultMgr) Eval2(req *match_evaluator.ToEvalReq, keyy string, evalStartTime int64, resultChan chan *detailResult, inTeam *map[string]bool) {
 	missInts := map[int]bool{}
-	for index, detail := range list {
+	for index, detail := range req.Details {
 		have := false
 		for _, ply := range detail.Ids {
 			_, ok := (*inTeam)[ply]
@@ -316,19 +357,24 @@ func (m *defaultMgr) Eval2(list []*match_evaluator.MatchDetail, subId int64, tas
 		}
 	}
 	nowV, err := m.getPoolVersion(keyy)
-	if err == nil && nowV == version {
+	if err == nil && nowV == req.Version {
 		resultChan <- &detailResult{
-			List:               list,
+			List:               req.Details,
 			MissIndex:          missInts,
-			EvalGroupSubId:     subId,
-			EvalGroupTaskCount: taskCount,
-			Version:            version,
+			EvalGroupSubId:     req.EvalGroupSubId,
+			EvalGroupTaskCount: req.EvalGroupTaskCount,
+			Version:            req.Version,
 			Key:                keyy,
+			StartTime:          req.StartTime,
+			GameId:             req.GameId,
+			SubType:            req.SubType,
+			EvalStartTime:      evalStartTime,
+			RunTime:            req.RunTime,
 		}
 	} else {
-		logger.Infof("result %d poolversion miss", subId)
+		logger.Infof("result %d poolversion miss", req.EvalGroupSubId)
 	}
-	logger.Infof("result Count timer %d %v", subId, time.Now().UnixNano()/1e6)
+	logger.Infof("result Count timer %d %v", req.EvalGroupSubId, time.Now().UnixNano()/1e6)
 }
 
 func (m *defaultMgr) Rem2(req *detailResult) {
