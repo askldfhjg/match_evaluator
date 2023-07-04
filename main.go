@@ -10,9 +10,15 @@ import (
 
 	"github.com/micro/micro/v3/service"
 	"github.com/micro/micro/v3/service/logger"
+
+	"net/http"
+	_ "net/http/pprof"
 )
 
 func main() {
+	go func() {
+		logger.Info(http.ListenAndServe(":6060", nil))
+	}()
 	evaluator.DefaultManager = manager.NewManager()
 	// Create service
 	srv := service.New(
@@ -41,4 +47,5 @@ func main() {
 	if err := srv.Run(); err != nil {
 		logger.Fatal(err)
 	}
+
 }

@@ -234,7 +234,7 @@ func (m *defaultMgr) processEval(chnl chan interface{}, gId string) {
 					if !flag {
 						key := fmt.Sprintf("%s:%d", v.GameId, v.SubType)
 						getIndex2[int(v.EvalGroupSubId)] = true
-						if startTime < 0 {
+						if startTime <= 0 {
 							startTime = time.Now().UnixNano() / 1e6
 						}
 						m.Eval2(v, key, startTime, msgChannel, &inTeam)
@@ -255,12 +255,12 @@ func (m *defaultMgr) metrics(req *detailResult) {
 		"gameId":  req.GameId,
 		"subType": strconv.FormatInt(req.SubType, 10),
 	}
-	err := metrics.Timing("match.fulltime", time.Duration(req.StartTime-now)*time.Millisecond, tags)
+	err := metrics.Timing("match.fulltime", time.Duration(now-req.StartTime)*time.Millisecond, tags)
 	if err != nil {
 		logger.Errorf("match.fulltime:err:%s", err.Error())
 	}
 
-	err = metrics.Timing("match.evaltime", time.Duration(req.EvalStartTime-now)*time.Millisecond, tags)
+	err = metrics.Timing("match.evaltime", time.Duration(now-req.EvalStartTime)*time.Millisecond, tags)
 	if err != nil {
 		logger.Errorf("match.evaltime:err:%s", err.Error())
 	}
@@ -272,9 +272,9 @@ func (m *defaultMgr) metricsEach(req *detailResult) {
 		"subType": strconv.FormatInt(req.SubType, 10),
 	}
 
-	err := metrics.Timing("match.evaltime", time.Duration(req.RunTime)*time.Millisecond, tags)
+	err := metrics.Timing("match.processtime", time.Duration(req.RunTime)*time.Millisecond, tags)
 	if err != nil {
-		logger.Errorf("match.evaltime:err:%s", err.Error())
+		logger.Errorf("match.processtime:err:%s", err.Error())
 	}
 }
 
