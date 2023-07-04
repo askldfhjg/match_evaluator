@@ -374,7 +374,7 @@ func (m *defaultMgr) Eval2(req *match_evaluator.ToEvalReq, keyy string, evalStar
 	} else {
 		logger.Infof("result %d poolversion miss", req.EvalGroupSubId)
 	}
-	logger.Infof("result Count timer %d %v", req.EvalGroupSubId, time.Now().UnixNano()/1e6)
+	//logger.Infof("result Count timer %d %v", req.EvalGroupSubId, time.Now().UnixNano()/1e6)
 }
 
 func (m *defaultMgr) Rem2(req *detailResult) {
@@ -424,7 +424,7 @@ func (m *defaultMgr) Rem2(req *detailResult) {
 	if needCount > 0 {
 		innerFunc()
 	}
-	logger.Infof("RemoveTokens success %d %d %d", req.EvalGroupSubId, len(req.List), time.Now().UnixNano()/1e6)
+	//logger.Infof("RemoveTokens success %d %d %d", req.EvalGroupSubId, len(req.List), time.Now().UnixNano()/1e6)
 }
 
 func (m *defaultMgr) getPoolVersion(key string) (int64, error) {
