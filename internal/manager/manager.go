@@ -207,6 +207,7 @@ func (m *defaultMgr) processEval(chnl chan interface{}, gId string) {
 						m.msgBackList <- groupId
 						logger.Infof("delete result timer %v", time.Now().UnixNano()/1e6)
 						m.metrics(req)
+						break FOR
 					}
 				} else {
 					tmpList = append(tmpList, req)
