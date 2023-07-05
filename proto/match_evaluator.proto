@@ -10,7 +10,7 @@ service Match_evaluator {
 }
 
 message MatchDetail {
-    repeated bytes ids = 1; // 组内详情
+    repeated string ids = 1; // 组内详情
     int64 endTime = 2;
     // int64 score = 2;         // 组的评分
     // string gameId = 3;
@@ -31,7 +31,7 @@ message ToEvalReadyRsp {
 }
 
 message ToEvalReq {
-    repeated bytes details = 1; // 成组结果
+    repeated MatchDetail details = 1; // 成组结果
     string taskId = 2;              // 任务ID
     string subTaskId = 3;           // 子任务ID
     string gameId = 4;              // 游戏ID
