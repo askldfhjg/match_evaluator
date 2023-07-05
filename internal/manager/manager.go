@@ -411,7 +411,7 @@ func (m *defaultMgr) Rem2(req *detailResult) {
 				logger.Errorf("RemoveTokens have err %d %s", req.EvalGroupSubId, err.Error())
 			}
 			needCount = 0
-			retDetail = retDetail[:0]
+			retDetail = make([]*match_evaluator.MatchDetail, 0, 256)
 		} else {
 			logger.Errorf("Rem2 poolversion 2 miss %d %d", nowV, req.Version)
 			return false
