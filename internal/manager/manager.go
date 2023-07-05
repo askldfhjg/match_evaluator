@@ -354,6 +354,9 @@ func (m *defaultMgr) Eval2(req *match_evaluator.ToEvalReq, keyy string, evalStar
 	for index, detail := range req.Details {
 		have := false
 		for _, ply := range detail.Ids {
+			if ply == "robot" {
+				continue
+			}
 			ok := (*inTeam)[ply]
 			have = have || ok
 		}
