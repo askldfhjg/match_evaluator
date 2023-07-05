@@ -354,7 +354,7 @@ func (m *defaultMgr) Eval2(req *match_evaluator.ToEvalReq, keyy string, evalStar
 	for index, detail := range req.Details {
 		have := false
 		for _, ply := range detail.Ids {
-			_, ok := (*inTeam)[ply]
+			ok := (*inTeam)[ply]
 			have = have || ok
 		}
 
