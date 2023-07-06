@@ -23,6 +23,7 @@ message ToEvalReadyReq {
     int64 evalGroupTaskCount = 4;   // 后置优化组内子任务数
     int64 evalGroupSubId = 5;       // 后置优化组内子任务ID
 	int64 version = 6;
+    int64 oldVersion = 7;
 }
 
 message ToEvalReadyRsp {
@@ -42,6 +43,8 @@ message ToEvalReq {
 	int64 version = 9;
     int64 startTime = 10;
     int64 runTime = 11;
+    int64 oldVersion = 12;
+    map<string, int32> moveList = 13;
 }
 
 message ToEvalRsp {

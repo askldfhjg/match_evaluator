@@ -2,39 +2,62 @@ package redis
 
 import (
 	"context"
-	match_evaluator "match_evaluator/proto"
+	"fmt"
 
 	"github.com/gomodule/redigo/redis"
 )
 
 const (
-	allTickets = "allTickets:"
-	//ticketKey      = "ticket:%s"
+	allTickets     = "allTickets:%d:%s"
 	poolVersionKey = "poolVersionKey:"
 )
 
-func (m *redisBackend) RemoveTokens(ctx context.Context, retDetail []*match_evaluator.MatchDetail, needCount int, key string) (int, error) {
+// func (m *redisBackend) RemoveTokens(ctx context.Context, retDetail []*match_evaluator.MatchDetail, needCount int, key string) (int, error) {
+// 	redisConn, err := m.redisPool.GetContext(ctx)
+// 	if err != nil {
+// 		return 0, err
+// 	}
+// 	defer handleConnectionClose(&redisConn)
+// 	zsetKey := allTickets + key
+
+// 	queryParams := make([]interface{}, needCount+1)
+// 	index := 0
+// 	queryParams[index] = zsetKey
+
+// 	for _, detail := range retDetail {
+// 		for _, id := range detail.Ids {
+// 			if id == "robot" {
+// 				continue
+// 			}
+// 			index++
+// 			queryParams[index] = id
+// 		}
+// 	}
+// 	return redis.Int(redisConn.Do("ZREM", queryParams...))
+// }
+
+func (m *redisBackend) MoveTokens(ctx context.Context, version int64, retDetail map[string]int32, key string) (int, error) {
 	redisConn, err := m.redisPool.GetContext(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer handleConnectionClose(&redisConn)
-	zsetKey := allTickets + key
+	if len(retDetail) <= 0 {
+		return 0, err
+	}
+	zsetKey := fmt.Sprintf(allTickets, version, key)
 
-	queryParams := make([]interface{}, needCount+1)
+	queryParams := make([]interface{}, len(retDetail)*2+1)
 	index := 0
 	queryParams[index] = zsetKey
 
-	for _, detail := range retDetail {
-		for _, id := range detail.Ids {
-			if id == "robot" {
-				continue
-			}
-			index++
-			queryParams[index] = id
-		}
+	for id, score := range retDetail {
+		index++
+		queryParams[index] = score
+		index++
+		queryParams[index] = id
 	}
-	return redis.Int(redisConn.Do("ZREM", queryParams...))
+	return redis.Int(redisConn.Do("ZADD", queryParams...))
 }
 
 func (m *redisBackend) GetPoolVersion(ctx context.Context, key string) (int64, error) {

@@ -164,6 +164,7 @@ func (m *defaultMgr) AddMsg(req interface{}) {
 
 type detailResult struct {
 	List               []*match_evaluator.MatchDetail
+	MoveList           map[string]int32
 	MissIndex          map[int]bool
 	EvalGroupSubId     int64
 	EvalGroupTaskCount int64
@@ -373,79 +374,81 @@ func (m *defaultMgr) Eval2(req *match_evaluator.ToEvalReq, keyy string, evalStar
 			missInts[index] = true
 		}
 	}
-	nowV, err := m.getPoolVersion(keyy)
-	if err == nil && nowV == req.Version {
-		resultChan <- &detailResult{
-			List:               req.Details,
-			MissIndex:          missInts,
-			EvalGroupSubId:     req.EvalGroupSubId,
-			EvalGroupTaskCount: req.EvalGroupTaskCount,
-			Version:            req.Version,
-			Key:                keyy,
-			StartTime:          req.StartTime,
-			GameId:             req.GameId,
-			SubType:            req.SubType,
-			EvalStartTime:      evalStartTime,
-			RunTime:            req.RunTime,
-		}
-	} else {
-		logger.Infof("result %d poolversion miss", req.EvalGroupSubId)
+	//nowV, err := m.getPoolVersion(keyy)
+	//if err == nil && nowV == req.Version {
+	resultChan <- &detailResult{
+		List:               req.Details,
+		MoveList:           req.MoveList,
+		MissIndex:          missInts,
+		EvalGroupSubId:     req.EvalGroupSubId,
+		EvalGroupTaskCount: req.EvalGroupTaskCount,
+		Version:            req.Version,
+		Key:                keyy,
+		StartTime:          req.StartTime,
+		GameId:             req.GameId,
+		SubType:            req.SubType,
+		EvalStartTime:      evalStartTime,
+		RunTime:            req.RunTime,
 	}
+	m.resultChannel1 <- req.Details
+	//} else {
+	//logger.Infof("result %d poolversion miss", req.EvalGroupSubId)
+	//}
 	//logger.Infof("result Count timer %d %v", req.EvalGroupSubId, time.Now().UnixNano()/1e6)
 }
 
 func (m *defaultMgr) Rem2(req *detailResult) {
-	nowV, err := m.getPoolVersion(req.Key)
-	if err != nil || nowV != req.Version {
-		logger.Errorf("Rem2 poolversion 1 miss %d %d", nowV, req.Version)
-		return
-	}
-	retDetail := make([]*match_evaluator.MatchDetail, 0, 256)
-	needCount := 0
+	// nowV, err := m.getPoolVersion(req.Key)
+	// if err != nil || nowV != req.Version {
+	// 	logger.Errorf("Rem2 poolversion 1 miss %d %d", nowV, req.Version)
+	// 	return
+	// }
+	retDetail := make(map[string]int32)
+	//needCount := 0
 
 	innerFunc := func() bool {
-		nowV, err := m.getPoolVersion(req.Key)
-		if err == nil && nowV == req.Version {
-			delCount, err := db.Default.RemoveTokens(context.Background(), retDetail, needCount, req.Key)
-			if err == nil {
-				m.resultChannel1 <- retDetail
-				if delCount != needCount {
-					logger.Errorf("eval delCount have err %d %d %d", req.EvalGroupSubId, delCount, needCount)
-				} else {
-					//logger.Infof("RemoveTokens success %d %d %d", req.EvalGroupSubId, len(retDetail), time.Now().UnixNano()/1e6)
-				}
+		//nowV, err := m.getPoolVersion(req.Key)
+		//if err == nil && nowV == req.Version {
+		delCount, err := db.Default.MoveTokens(context.Background(), req.Version, retDetail, req.Key)
+		if err == nil {
+			//m.resultChannel1 <- retDetail
+			if delCount != len(retDetail) {
+				logger.Errorf("eval delCount have err %d %d %d", req.EvalGroupSubId, delCount, len(retDetail))
 			} else {
-				logger.Errorf("RemoveTokens have err %d %s", req.EvalGroupSubId, err.Error())
+				//logger.Infof("RemoveTokens success %d %d %d", req.EvalGroupSubId, len(retDetail), time.Now().UnixNano()/1e6)
 			}
-			needCount = 0
-			retDetail = make([]*match_evaluator.MatchDetail, 0, 256)
 		} else {
-			logger.Errorf("Rem2 poolversion 2 miss %d %d", nowV, req.Version)
-			return false
+			logger.Errorf("RemoveTokens have err %d %s", req.EvalGroupSubId, err.Error())
 		}
+		retDetail = make(map[string]int32)
+		// } else {
+		// 	logger.Errorf("Rem2 poolversion 2 miss %d %d", nowV, req.Version)
+		// 	return false
+		// }
 		return true
 	}
 
-	for pos, detail := range req.List {
-		if _, ok := req.MissIndex[pos]; ok {
-			continue
-		}
-		retDetail = append(retDetail, detail)
-		ccc := 0
-		for _, ply := range detail.Ids {
-			if ply == "robot" {
-				continue
-			}
-			ccc++
-		}
-		needCount += ccc
-		if needCount >= 512 {
+	// missIds := make([]string, 0, 64)
+	// for pos := range req.MissIndex {
+	// 	detail := req.List[pos]
+	// 	if detail != nil {
+	// 		for _, ply := range detail.Ids {
+	// 			if ply == "robot" {
+	// 				continue
+	// 			}
+	// 			missIds = append(missIds, ply)
+	// 		}
+	// 	}
+	// }
+	for idd, score := range req.MoveList {
+		retDetail[idd] = score
+		if len(retDetail) >= 512 {
 			if !innerFunc() {
 				return
 			}
 		}
 	}
-	if needCount > 0 {
+	if len(retDetail) > 0 {
 		innerFunc()
 	}
 	//logger.Infof("RemoveTokens success %d %d %d", req.EvalGroupSubId, len(req.List), time.Now().UnixNano()/1e6)
