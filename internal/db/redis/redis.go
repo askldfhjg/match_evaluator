@@ -27,6 +27,9 @@ func (m *redisBackend) RemoveTokens(ctx context.Context, retDetail []*match_eval
 
 	for _, detail := range retDetail {
 		for _, id := range detail.Ids {
+			if id == "robot" {
+				continue
+			}
 			index++
 			queryParams[index] = id
 		}

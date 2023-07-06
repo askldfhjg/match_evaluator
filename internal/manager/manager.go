@@ -364,6 +364,9 @@ func (m *defaultMgr) Eval2(req *match_evaluator.ToEvalReq, keyy string, evalStar
 
 		if !have {
 			for _, ply := range detail.Ids {
+				if ply == "robot" {
+					continue
+				}
 				(*inTeam)[ply] = true
 			}
 		} else {
@@ -428,7 +431,14 @@ func (m *defaultMgr) Rem2(req *detailResult) {
 			continue
 		}
 		retDetail = append(retDetail, detail)
-		needCount += len(detail.Ids)
+		ccc := 0
+		for _, ply := range detail.Ids {
+			if ply == "robot" {
+				continue
+			}
+			ccc++
+		}
+		needCount += ccc
 		if needCount >= 512 {
 			if !innerFunc() {
 				return
