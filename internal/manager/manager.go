@@ -177,7 +177,7 @@ type detailResult struct {
 }
 
 func (m *defaultMgr) processEval(chnl chan interface{}, gId string, taskCount int64) {
-	getIndex1 := map[int]bool{}
+	//getIndex1 := map[int]bool{}
 	getIndex2 := map[int]bool{}
 	getIndex3 := map[int]bool{}
 	redayOk := false
@@ -220,24 +220,25 @@ func (m *defaultMgr) processEval(chnl chan interface{}, gId string, taskCount in
 				}
 			case req := <-channel:
 				switch v := req.(type) {
-				case *match_evaluator.ToEvalReadyReq:
-					flag := getIndex1[int(v.EvalGroupSubId)]
-					if !flag {
-						getIndex1[int(v.EvalGroupSubId)] = true
-					}
-					if len(getIndex1) == int(v.EvalGroupTaskCount) && !redayOk {
-						//logger.Infof("ready ok %v %d", time.Now().UnixNano()/1e6, len(tmpList))
-						redayOk = true
-						if len(tmpList) > 0 {
-							go func() {
-								for _, v := range tmpList {
-									msgChannel <- v
-								}
-								tmpList = tmpList[:0]
-							}()
-						}
-					}
+				// case *match_evaluator.ToEvalReadyReq:
+				// 	flag := getIndex1[int(v.EvalGroupSubId)]
+				// 	if !flag {
+				// 		getIndex1[int(v.EvalGroupSubId)] = true
+				// 	}
+				// 	if len(getIndex1) == int(v.EvalGroupTaskCount) && !redayOk {
+				// 		//logger.Infof("ready ok %v %d", time.Now().UnixNano()/1e6, len(tmpList))
+				// 		redayOk = true
+				// 		if len(tmpList) > 0 {
+				// 			go func() {
+				// 				for _, v := range tmpList {
+				// 					msgChannel <- v
+				// 				}
+				// 				tmpList = tmpList[:0]
+				// 			}()
+				// 		}
+				// 	}
 				case *match_evaluator.ToEvalReq:
+					redayOk = true
 					flag := getIndex2[int(v.EvalGroupSubId)]
 					if !flag {
 						key := fmt.Sprintf("%s:%d", v.GameId, v.SubType)
