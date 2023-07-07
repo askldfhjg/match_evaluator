@@ -13,6 +13,8 @@ type Service interface {
 	//RemoveTokens(ctx context.Context, retDetail []*match_evaluator.MatchDetail, needCount int, key string) (int, error)
 	GetPoolVersion(ctx context.Context, key string) (int64, error)
 	MoveTokens(ctx context.Context, version int64, retDetail map[string]int32, key string) (int, error)
+	DelTaskFlag(ctx context.Context, key string, version int64, subTaskKey string) (int, error)
+	UnLockPool(ctx context.Context, key string, version int64) error
 }
 
 type MatchInfo struct {

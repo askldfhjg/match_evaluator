@@ -175,6 +175,8 @@ type detailResult struct {
 	GameId             string
 	SubType            int64
 	EvalStartTime      int64
+	SubTaskId          string
+	OldVersion         int64
 }
 
 func (m *defaultMgr) processEval(chnl chan interface{}, gId string, taskCount int64) {
@@ -389,6 +391,8 @@ func (m *defaultMgr) Eval2(req *match_evaluator.ToEvalReq, keyy string, evalStar
 		SubType:            req.SubType,
 		EvalStartTime:      evalStartTime,
 		RunTime:            req.RunTime,
+		SubTaskId:          req.SubTaskId,
+		OldVersion:         req.OldVersion,
 	}
 	m.resultChannel1 <- req.Details
 	//} else {
@@ -450,6 +454,16 @@ func (m *defaultMgr) Rem2(req *detailResult) {
 	}
 	if len(retDetail) > 0 {
 		innerFunc()
+	}
+	cc, err := db.Default.DelTaskFlag(context.Background(), req.Key, req.OldVersion, req.SubTaskId)
+	if err != nil {
+		logger.Errorf("DelTaskFlag have error %s %d %s", req.Key, req.Version, req.SubTaskId)
+	}
+	if cc <= 0 {
+		err := db.Default.UnLockPool(context.Background(), req.Key, req.Version)
+		if err != nil {
+			logger.Errorf("UnLockPool have error %s %d", req.Key, req.Version)
+		}
 	}
 	//logger.Infof("RemoveTokens success %d %d %d", req.EvalGroupSubId, len(req.List), time.Now().UnixNano()/1e6)
 }
