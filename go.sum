@@ -44,8 +44,7 @@ github.com/alecthomas/units v0.0.0-20190717042225-c3de453c63f4/go.mod h1:ybxpYRF
 github.com/aliyun/alibaba-cloud-sdk-go v0.0.0-20190808125512-07798873deee/go.mod h1:myCDvQSzCW+wB1WAlocEru4wMGJxy+vlxHdhegi1CDQ=
 github.com/aliyun/aliyun-oss-go-sdk v0.0.0-20190307165228-86c17b95fcd5/go.mod h1:T/Aws4fEfogEE9v+HPhhw+CntffsBHJ8nXQCwKr0/g8=
 github.com/apache/thrift v0.12.0/go.mod h1:cp2SuWMxlEZw2r+iP2GNCdIi4C1qmUzdZFSVb+bacwQ=
-github.com/askldfhjg/match_apis/match_process/proto v0.0.0-20230705090305-e26e4f666a30 h1:D/nRpe6wW1yiVR5gkegGEGJQNSfjSEJRmkX27Ywef+8=
-github.com/askldfhjg/match_apis/match_process/proto v0.0.0-20230705090305-e26e4f666a30/go.mod h1:U2h7k1TmDsyCSW82CfHCfH59Jl075osJtGRPruRyYDY=
+github.com/askldfhjg/match_apis/match_process/proto v0.0.0-20230706074628-18f201506e74 h1:H/pQDkJjaibMV3fjOUwQylE8GEr08fS26UZFKoGSt9Q=
 github.com/askldfhjg/micro/v3 v3.6.4 h1:XfnNjpp/GxYkBQ9MnlWaGypYLCH71wPoO0u+5w0pNQw=
 github.com/aws/aws-sdk-go v1.23.0/go.mod h1:KmX6BPdI08NWTb3/sm4ZGu5ShLoqVDhKgpiN924inxo=
 github.com/baiyubin/aliyun-sts-go-sdk v0.0.0-20180326062324-cfa1a18b161f/go.mod h1:AuiFmCCPBSrqvVMvuqFuk0qogytodnVFVSN5CeJB8Gc=
